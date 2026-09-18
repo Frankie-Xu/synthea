@@ -346,6 +346,7 @@ task versionTxt() {
 }
 
 compileJava.dependsOn versionTxt
+processResources.dependsOn versionTxt
 shadowJar.dependsOn versionTxt
 uberJar.dependsOn versionTxt
 uberJar.dependsOn shadowJar
