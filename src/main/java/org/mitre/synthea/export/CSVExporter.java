@@ -585,16 +585,18 @@ public class CSVExporter {
       String encounterID, Observation observation) throws IOException {
 
     if (observation.value == null) {
-      if (observation.observations != null && !observation.observations.isEmpty()) {
-        // just loop through the child observations
+      if (observation.observations == null || observation.observations.isEmpty()) {
+        return;
+      }
 
+      // A coded panel has an observation row even though its value is represented by children.
+      // An uncoded null observation remains a container and is not written.
+      if (observation.codes == null || observation.codes.isEmpty()) {
         for (Observation subObs : observation.observations) {
           exportObservation(personID, encounterID, subObs);
         }
+        return;
       }
-
-      // no value so nothing more to report here
-      return;
     }
 
     // DATE,PATIENT,ENCOUNTER,CATEGORY,CODE,DESCRIPTION,VALUE,UNITS
@@ -617,10 +619,16 @@ public class CSVExporter {
     String type = ExportHelper.getObservationType(observation);
     s.append(clean(value)).append(',');
     s.append(clean(observation.unit)).append(',');
-    s.append(type);
+    s.append(clean(type));
 
     s.append(NEWLINE);
     fileManager.writeResourceLine(s.toString(), CSVConstants.OBSERVATION_KEY);
+
+    if (observation.value == null) {
+      for (Observation subObs : observation.observations) {
+        exportObservation(personID, encounterID, subObs);
+      }
+    }
   }
 
   /**
