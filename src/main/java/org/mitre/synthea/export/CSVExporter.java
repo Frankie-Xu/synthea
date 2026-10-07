@@ -583,48 +583,40 @@ public class CSVExporter {
    */
   private void exportObservation(String personID,
       String encounterID, Observation observation) throws IOException {
+    boolean hasChildren = observation.observations != null && !observation.observations.isEmpty();
+    boolean isCodedPanel = hasChildren && observation.codes != null && !observation.codes.isEmpty();
 
-    if (observation.value == null) {
-      if (observation.observations == null || observation.observations.isEmpty()) {
-        return;
-      }
+    if (observation.value != null || isCodedPanel) {
+      // A coded panel retains its identity even though its value is represented by children.
+      // DATE,PATIENT,ENCOUNTER,CATEGORY,CODE,DESCRIPTION,VALUE,UNITS,TYPE
+      StringBuilder s = new StringBuilder();
 
-      // A coded panel has an observation row even though its value is represented by children.
-      // An uncoded null observation remains a container and is not written.
-      if (observation.codes == null || observation.codes.isEmpty()) {
-        for (Observation subObs : observation.observations) {
-          exportObservation(personID, encounterID, subObs);
-        }
-        return;
+      s.append(iso8601Timestamp(observation.start)).append(',');
+      s.append(personID).append(',');
+      s.append(encounterID).append(',');
+      if (observation.category != null) {
+        s.append(observation.category);
       }
+      s.append(',');
+
+      Code coding = observation.codes.get(0);
+
+      s.append(coding.code).append(',');
+      s.append(clean(coding.display)).append(',');
+
+      String value = ExportHelper.getObservationValue(observation);
+      String type = ExportHelper.getObservationType(observation);
+      s.append(clean(value)).append(',');
+      s.append(clean(observation.value == null ? null : observation.unit)).append(',');
+      s.append(clean(type));
+
+      s.append(NEWLINE);
+      fileManager.writeResourceLine(s.toString(), CSVConstants.OBSERVATION_KEY);
     }
 
-    // DATE,PATIENT,ENCOUNTER,CATEGORY,CODE,DESCRIPTION,VALUE,UNITS
-    StringBuilder s = new StringBuilder();
-
-    s.append(iso8601Timestamp(observation.start)).append(',');
-    s.append(personID).append(',');
-    s.append(encounterID).append(',');
-    if (observation.category != null) {
-      s.append(observation.category);
-    }
-    s.append(',');
-
-    Code coding = observation.codes.get(0);
-
-    s.append(coding.code).append(',');
-    s.append(clean(coding.display)).append(',');
-
-    String value = ExportHelper.getObservationValue(observation);
-    String type = ExportHelper.getObservationType(observation);
-    s.append(clean(value)).append(',');
-    s.append(clean(observation.unit)).append(',');
-    s.append(clean(type));
-
-    s.append(NEWLINE);
-    fileManager.writeResourceLine(s.toString(), CSVConstants.OBSERVATION_KEY);
-
-    if (observation.value == null) {
+    // Preserve scalar semantics: components supply a value only when the parent has none.
+    // Uncoded null containers are not written, but their children are still traversed.
+    if (observation.value == null && hasChildren) {
       for (Observation subObs : observation.observations) {
         exportObservation(personID, encounterID, subObs);
       }

@@ -8,8 +8,10 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -55,6 +57,7 @@ public class CSVExporterPanelObservationTest {
     HealthRecord panel = person.record;
     HealthRecord.Observation parent = panel.new Observation(1000L, "PANEL", null);
     parent.category = "laboratory";
+    parent.unit = "panel-unit";
     parent.codes.add(new HealthRecord.Code("LOINC", "PANEL", "Panel"));
     parent.observations.add(observation(person, "COMPONENT_A", "Component A", 1.0));
     parent.observations.add(observation(person, "COMPONENT_B", "Component B", 2.0));
@@ -65,6 +68,9 @@ public class CSVExporterPanelObservationTest {
     assertEquals("PANEL", rows.get(0).get("CODE"));
     assertEquals("Panel", rows.get(0).get("DESCRIPTION"));
     assertEquals("laboratory", rows.get(0).get("CATEGORY"));
+    assertEquals("1970-01-01T00:00:01Z", rows.get(0).get("DATE"));
+    assertEquals("patient-1", rows.get(0).get("PATIENT"));
+    assertEquals("encounter-1", rows.get(0).get("ENCOUNTER"));
     assertEquals("", rows.get(0).get("VALUE"));
     assertEquals("", rows.get(0).get("UNITS"));
     assertEquals("", rows.get(0).get("TYPE"));
@@ -76,12 +82,15 @@ public class CSVExporterPanelObservationTest {
   public void exportsScalarObservation() throws Exception {
     Person person = new Person(2L);
     HealthRecord.Observation scalar = observation(person, "SCALAR", "Scalar", 42.0);
+    scalar.unit = "mg/dL";
+    scalar.observations.add(observation(person, "CHILD", "Child", 7.0));
 
     write(person, scalar);
     List<Map<String, String>> rows = rows();
     assertEquals(1, rows.size());
     assertEquals("SCALAR", rows.get(0).get("CODE"));
     assertEquals("42.0", rows.get(0).get("VALUE"));
+    assertEquals("mg/dL", rows.get(0).get("UNITS"));
     assertEquals("numeric", rows.get(0).get("TYPE"));
   }
 
@@ -98,6 +107,63 @@ public class CSVExporterPanelObservationTest {
     assertEquals(1, rows.size());
     assertEquals("CHILD", rows.get(0).get("CODE"));
     assertTrue(rows.get(0).get("VALUE").contains("text"));
+  }
+
+  @Test
+  public void exportsNestedPanelsBeforeTheirDescendants() throws Exception {
+    Person person = new Person(4L);
+    HealthRecord.Observation outer = observation(person, "OUTER", "Outer", null);
+    HealthRecord.Observation container = person.record.new Observation(1000L, "CONTAINER", null);
+    HealthRecord.Observation inner = observation(person, "INNER", "Inner", null);
+    inner.observations.add(observation(person, "LEAF", "Leaf", 3.0));
+    container.observations.add(inner);
+    outer.observations.add(container);
+    outer.observations.add(observation(person, "SIBLING", "Sibling", 4.0));
+
+    write(person, outer);
+    List<Map<String, String>> rows = rows();
+    assertEquals(Arrays.asList("OUTER", "INNER", "LEAF", "SIBLING"),
+        rows.stream().map(row -> row.get("CODE")).collect(Collectors.toList()));
+    for (Map<String, String> row : rows) {
+      assertEquals("patient-1", row.get("PATIENT"));
+      assertEquals("encounter-1", row.get("ENCOUNTER"));
+    }
+  }
+
+  @Test
+  public void preservesCodedAndTextScalarSemanticsWithChildren() throws Exception {
+    Person person = new Person(5L);
+    HealthRecord.Observation coded = observation(person, "CODED", "Coded",
+        new HealthRecord.Code("SNOMED-CT", "POSITIVE", "Positive"));
+    coded.observations.add(observation(person, "HIDDEN_CODED_CHILD", "Hidden", 1.0));
+    HealthRecord.Observation text = observation(person, "TEXT", "Text", "result");
+    text.observations.add(observation(person, "HIDDEN_TEXT_CHILD", "Hidden", 2.0));
+
+    write(person, coded);
+    write(person, text);
+    List<Map<String, String>> rows = rows();
+    assertEquals(2, rows.size());
+    assertEquals("CODED", rows.get(0).get("CODE"));
+    assertEquals("Positive", rows.get(0).get("VALUE"));
+    assertEquals("text", rows.get(0).get("TYPE"));
+    assertEquals("TEXT", rows.get(1).get("CODE"));
+    assertEquals("result", rows.get(1).get("VALUE"));
+    assertEquals("text", rows.get(1).get("TYPE"));
+  }
+
+  @Test
+  public void skipsCodedNullLeavesAndNullChildLists() throws Exception {
+    Person person = new Person(6L);
+    HealthRecord.Observation empty = observation(person, "EMPTY", "Empty", null);
+    HealthRecord.Observation absent = observation(person, "ABSENT", "Absent", null);
+    absent.observations = null;
+
+    write(person, empty);
+    write(person, absent);
+    write(person, observation(person, "VISIBLE", "Visible", 5.0));
+    List<Map<String, String>> rows = rows();
+    assertEquals(1, rows.size());
+    assertEquals("VISIBLE", rows.get(0).get("CODE"));
   }
 
   private HealthRecord.Observation observation(Person person, String code, String display,
